@@ -1,0 +1,244 @@
+services:
+  # ==========================================
+  # OPC UA Server
+  # ==========================================
+  opc-server:
+    build:
+      context: ./src/OpcServer
+      dockerfile: Dockerfile
+    container_name: opc-server
+    restart: unless-stopped
+    ports:
+      - "4840:4840"
+    networks:
+      - beverage_network
+
+  # ==========================================
+  # MQTT Broker
+  # ==========================================
+  mqtt:
+    image: eclipse-mosquitto:latest
+    container_name: mosquitto-broker
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./infrastructure/mosquitto/config:/mosquitto/config
+      - ./infrastructure/mosquitto/data:/mosquitto/data
+      - ./infrastructure/mosquitto/log:/mosquitto/log
+    networks:
+      - beverage_network
+
+  # ==========================================
+  # OPC UA to MQTT Bridge
+  # ==========================================
+  opc-mqtt-bridge:
+    build:
+      context: ./src/OpcMqttBridge
+      dockerfile: Dockerfile
+    container_name: opc-mqtt-bridge
+    restart: unless-stopped
+    depends_on:
+      - opc-server
+      - mqtt
+    networks:
+      - beverage_network
+    environment:
+      - OPC_SERVER_URL=opc.tcp://opc-server:4840
+      - MQTT_BROKER=mosquitto-broker
+      - MQTT_PORT=1883
+
+  # ==========================================
+  # Redis Cache
+  # ==========================================
+  redis:
+    image: redis/redis-stack:latest
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+      - "8001:8001"
+    volumes:
+      - redis_data:/data
+    networks:
+      - beverage_network
+
+  # ==========================================
+  # Redis Hydration Agent
+  # ==========================================
+  redis_hydration:
+    image: docker.redpanda.com/redpandadata/connect:latest
+    container_name: redis_hydration
+    restart: unless-stopped
+    depends_on:
+      - mqtt
+      - redis
+    networks:
+      - beverage_network
+    volumes:
+      - ./config/redis_hydration.yaml:/connect.yaml
+
+  # ==========================================
+  # Kafka (Redpanda)
+  # ==========================================
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: redpanda
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --smp 1
+      - --default-log-level=info
+    ports:
+      - "18081:18081"
+      - "18082:18082"
+      - "19092:19092"
+      - "19644:9644"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    networks:
+      - beverage_network
+
+  # ==========================================
+  # Redpanda Console (Kafka UI)
+  # ==========================================
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:latest
+    container_name: redpanda-console
+    restart: unless-stopped
+    entrypoint: /bin/sh
+    command: -c 'echo "$$CONSOLE_CONFIG_FILE" > /tmp/config.yml; /app/console'
+    environment:
+      CONFIG_FILEPATH: /tmp/config.yml
+      CONSOLE_CONFIG_FILE: |
+        kafka:
+          brokers: ["redpanda:9092"]
+        schemaRegistry:
+          enabled: true
+          urls: ["http://redpanda:8081"]
+        redpanda:
+          adminApi:
+            enabled: true
+            urls: ["http://redpanda:9644"]
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redpanda
+    networks:
+      - beverage_network
+
+  # ==========================================
+  # MQTT to Kafka Bridge
+  # ==========================================
+  mqtt_to_kafka:
+    image: docker.redpanda.com/redpandadata/connect:latest
+    container_name: mqtt_to_kafka
+    restart: unless-stopped
+    volumes:
+      - ./config/mqtt_to_kafka.yaml:/connect.yaml
+    depends_on:
+      - mqtt
+      - redis
+      - redpanda
+    networks:
+      - beverage_network
+
+  # ==========================================
+  # TimescaleDB
+  # ==========================================
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: beverage_data
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./infrastructure/timescaledb/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - beverage_network
+
+  # ==========================================
+  # Kafka to TimescaleDB Bridge
+  # ==========================================
+  kafka-timescaledb-bridge:
+    build:
+      context: ./src/KafkaTimescaledbBridge
+      dockerfile: Dockerfile
+    container_name: kafka-timescaledb-bridge
+    restart: unless-stopped
+    depends_on:
+      - redpanda
+      - timescaledb
+    networks:
+      - beverage_network
+    environment:
+      - KAFKA_BROKER=redpanda:9092
+      - KAFKA_TOPIC=beverage_metrics
+      - KAFKA_GROUP_ID=timescaledb-consumer-group
+      - DB_HOST=timescaledb
+      - DB_PORT=5432
+      - DB_NAME=beverage_data
+      - DB_USER=admin
+      - DB_PASSWORD=admin123
+
+  # ==========================================
+  # pgAdmin (Database UI)
+  # ==========================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - beverage_network
+
+  # ==========================================
+  # Grafana (Visualization)
+  # ==========================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin123
+      GF_INSTALL_PLUGINS: marcusolsson-dynamictext-panel,volkovlabs-echarts-panel
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - timescaledb
+    networks:
+      - beverage_network
+
+networks:
+  beverage_network:
+    driver: bridge
+
+volumes:
+  redis_data:
+  redpanda_data:
+  timescale_data:
+  pgadmin_data:
+  grafana_data:

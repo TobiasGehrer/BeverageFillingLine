@@ -1,0 +1,53 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.rsuser
+*.userosscache
+*.sln.docstates
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+
+# .NET
+*.dll
+*.exe
+*.pdb
+*.cache
+*.log
+
+# Rider
+.idea/
+*.sln.iml
+
+# Docker volumes and data
+infrastructure/mosquitto/data/
+infrastructure/mosquitto/log/
+infrastructure/redis/data/
+infrastructure/grafana/data/
+
+# Environment files
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Certificates
+*.pfx
+*.p12
+*.key
+*.crt
+*.pem
+pki/

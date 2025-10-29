@@ -1,0 +1,37 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36518.9
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpcServer", "src\OpcServer\OpcServer.csproj", "{505D8876-2BE9-4373-89AC-7E890C56CA26}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpcMqttBridge", "src\OpcMqttBridge\OpcMqttBridge.csproj", "{48B274D4-62CA-40C9-906E-099B0B682AAB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KafkaTimescaledbBridge", "src\KafkaTimescaledbBridge\KafkaTimescaledbBridge.csproj", "{0C0C44B3-610B-4D35-A829-1A3C55222B46}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{505D8876-2BE9-4373-89AC-7E890C56CA26}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{505D8876-2BE9-4373-89AC-7E890C56CA26}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{505D8876-2BE9-4373-89AC-7E890C56CA26}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{505D8876-2BE9-4373-89AC-7E890C56CA26}.Release|Any CPU.Build.0 = Release|Any CPU
+		{48B274D4-62CA-40C9-906E-099B0B682AAB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{48B274D4-62CA-40C9-906E-099B0B682AAB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{48B274D4-62CA-40C9-906E-099B0B682AAB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{48B274D4-62CA-40C9-906E-099B0B682AAB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0C0C44B3-610B-4D35-A829-1A3C55222B46}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0C0C44B3-610B-4D35-A829-1A3C55222B46}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0C0C44B3-610B-4D35-A829-1A3C55222B46}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0C0C44B3-610B-4D35-A829-1A3C55222B46}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {94DAF942-39E7-4766-A93A-917F5A45C40F}
+	EndGlobalSection
+EndGlobal

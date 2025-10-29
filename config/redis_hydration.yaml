@@ -1,0 +1,29 @@
+input:
+  label: "mqtt_in"
+  mqtt:
+    urls:
+      - "tcp://mosquitto-broker:1883"
+    client_id: "redis-hydration-client"
+    keepalive: 60
+    clean_session: true
+    topics:
+      - "v1/best-beverage/+/+/+/+"
+
+pipeline:
+  processors:
+    - mapping: |
+        root.field = meta("mqtt_topic").split("/").index(-1)
+        root.key = meta("mqtt_topic").split("/").index(-2)
+        root.value = this.value.string()
+        meta key = root.key
+        
+    - mapping: |
+        root = { this.field: this.value }
+
+output:
+  label: "redis_out"
+  redis_hash:
+    url: "redis://redis:6379"
+    key: ${! meta("key") }
+    walk_metadata: false
+    walk_json_object: true
