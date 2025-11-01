@@ -1,5 +1,6 @@
 using Opc.Ua;
 using Opc.Ua.Server;
+using System.Reflection;
 
 namespace OpcServer
 {
@@ -8,12 +9,16 @@ namespace OpcServer
         private BeverageFillingLineMachine _machine;
         private Dictionary<string, BaseDataVariableState> _variables;
         private Timer _updateTimer;
+        private HashSet<string> _staticProperties;
 
-        public BeverageFillingLineNodeManager(IServerInternal server, ApplicationConfiguration configuration, BeverageFillingLineMachine machine)
-            : base(server, configuration, "urn:BeverageServer:")
+        public BeverageFillingLineNodeManager(IServerInternal server, ApplicationConfiguration configuration, BeverageFillingLineMachine machine) : base(server, configuration, "urn:BeverageServer:")
         {
             _machine = machine;
             _variables = new Dictionary<string, BaseDataVariableState>();
+            _staticProperties = new HashSet<string>
+            {
+                "MachineName", "MachineSerialNumber", "Plant", "ProductionSegment", "ProductionLine"
+            };
             SetNamespaces("urn:BeverageServer:");
         }
 
@@ -22,9 +27,7 @@ namespace OpcServer
             lock (Lock)
             {
                 LoadPredefinedNodes(SystemContext, externalReferences);
-
-                // Start updating OPC variables
-                _updateTimer = new Timer(UpdateOpcVariables, null, 0, 3000);
+                _updateTimer = new Timer(UpdateOpcVariables, null, 0, 1000); // 1 second updates
             }
         }
 
@@ -47,100 +50,44 @@ namespace OpcServer
                 AddPredefinedNode(context, root);
                 predefinedNodes.Add(root);
 
-                // Machine Identification
-                CreateVariable(root, "MachineName", DataTypeIds.String, _machine.MachineName, predefinedNodes);
-                CreateVariable(root, "MachineSerialNumber", DataTypeIds.String, _machine.MachineSerialNumber, predefinedNodes);
-                CreateVariable(root, "Plant", DataTypeIds.String, _machine.Plant, predefinedNodes);
-                CreateVariable(root, "ProductionSegment", DataTypeIds.String, _machine.ProductionSegment, predefinedNodes);
-                CreateVariable(root, "ProductionLine", DataTypeIds.String, _machine.ProductionLine, predefinedNodes);
+                // Auto-create variables from machine properties
+                CreateVariablesFromProperties(root, predefinedNodes);
 
-                // Production Order
-                CreateVariable(root, "ProductionOrder", DataTypeIds.String, _machine.ProductionOrder, predefinedNodes);
-                CreateVariable(root, "Article", DataTypeIds.String, _machine.Article, predefinedNodes);
-                CreateVariable(root, "Quantity", DataTypeIds.UInt32, _machine.Quantity, predefinedNodes);
-                CreateVariable(root, "CurrentLotNumber", DataTypeIds.String, _machine.CurrentLotNumber, predefinedNodes);
-                CreateVariable(root, "ExpirationDate", DataTypeIds.DateTime, _machine.ExpirationDate, predefinedNodes);
-
-                // Target Values
-                CreateVariable(root, "TargetFillVolume", DataTypeIds.Double, _machine.TargetFillVolume, predefinedNodes);
-                CreateVariable(root, "TargetLineSpeed", DataTypeIds.Double, _machine.TargetLineSpeed, predefinedNodes);
-                CreateVariable(root, "TargetProductTemperature", DataTypeIds.Double, _machine.TargetProductTemperature, predefinedNodes);
-                CreateVariable(root, "TargetCO2Pressure", DataTypeIds.Double, _machine.TargetCO2Pressure, predefinedNodes);
-                CreateVariable(root, "TargetCapTorque", DataTypeIds.Double, _machine.TargetCapTorque, predefinedNodes);
-                CreateVariable(root, "TargetCycleTime", DataTypeIds.Double, _machine.TargetCycleTime, predefinedNodes);
-
-                // Actual Values
-                CreateVariable(root, "ActualFillVolume", DataTypeIds.Double, _machine.ActualFillVolume, predefinedNodes);
-                CreateVariable(root, "ActualLineSpeed", DataTypeIds.Double, _machine.ActualLineSpeed, predefinedNodes);
-                CreateVariable(root, "ActualProductTemperature", DataTypeIds.Double, _machine.ActualProductTemperature, predefinedNodes);
-                CreateVariable(root, "ActualCO2Pressure", DataTypeIds.Double, _machine.ActualCO2Pressure, predefinedNodes);
-                CreateVariable(root, "ActualCapTorque", DataTypeIds.Double, _machine.ActualCapTorque, predefinedNodes);
-                CreateVariable(root, "ActualCycleTime", DataTypeIds.Double, _machine.ActualCycleTime, predefinedNodes);
-                CreateVariable(root, "FillAccuracyDeviation", DataTypeIds.Double, _machine.FillAccuracyDeviation, predefinedNodes);
-
-                // System Status
-                CreateVariable(root, "MachineStatus", DataTypeIds.String, _machine.MachineStatus, predefinedNodes);
-                CreateVariable(root, "CurrentStation", DataTypeIds.String, _machine.CurrentStation, predefinedNodes);
-                CreateVariable(root, "ProductLevelTank", DataTypeIds.Double, _machine.ProductLevelTank, predefinedNodes);
-                CreateVariable(root, "CleaningCycleStatus", DataTypeIds.String, _machine.CleaningCycleStatus, predefinedNodes);
-                CreateVariable(root, "QualityCheckWeight", DataTypeIds.String, _machine.QualityCheckWeight, predefinedNodes);
-                CreateVariable(root, "QualityCheckLevel", DataTypeIds.String, _machine.QualityCheckLevel, predefinedNodes);
-
-                // Counters - Global
-                CreateVariable(root, "GoodBottles", DataTypeIds.UInt32, _machine.GoodBottles, predefinedNodes);
-                CreateVariable(root, "BadBottlesVolume", DataTypeIds.UInt32, _machine.BadBottlesVolume, predefinedNodes);
-                CreateVariable(root, "BadBottlesWeight", DataTypeIds.UInt32, _machine.BadBottlesWeight, predefinedNodes);
-                CreateVariable(root, "BadBottlesCap", DataTypeIds.UInt32, _machine.BadBottlesCap, predefinedNodes);
-                CreateVariable(root, "BadBottlesOther", DataTypeIds.UInt32, _machine.BadBottlesOther, predefinedNodes);
-                CreateVariable(root, "TotalBadBottles", DataTypeIds.UInt32, _machine.TotalBadBottles, predefinedNodes);
-                CreateVariable(root, "TotalBottles", DataTypeIds.UInt32, _machine.TotalBottles, predefinedNodes);
-
-                // Counters - Current Order
-                CreateVariable(root, "GoodBottlesOrder", DataTypeIds.UInt32, _machine.GoodBottlesOrder, predefinedNodes);
-                CreateVariable(root, "BadBottlesOrder", DataTypeIds.UInt32, _machine.BadBottlesOrder, predefinedNodes);
-                CreateVariable(root, "TotalBottlesOrder", DataTypeIds.UInt32, _machine.TotalBottlesOrder, predefinedNodes);
-                CreateVariable(root, "ProductionOrderProgress", DataTypeIds.Double, _machine.ProductionOrderProgress, predefinedNodes);
-
-                // Alarms
-                CreateArrayVariable(root, "ActiveAlarms", DataTypeIds.String, _machine.ActiveAlarms.ToArray(), predefinedNodes);
-                CreateVariable(root, "AlarmCount", DataTypeIds.UInt32, (uint)_machine.ActiveAlarms.Count, predefinedNodes);
-
-                // Create Methods Folder
+                // Create methods folder
                 FolderState methodsFolder = new FolderState(root)
                 {
                     NodeId = new NodeId("Methods", NamespaceIndex),
                     BrowseName = new QualifiedName("Methods", NamespaceIndex),
-                    DisplayName = new LocalizedText("Control Methods"),
+                    DisplayName = new LocalizedText("Methods"),
                     TypeDefinitionId = ObjectTypeIds.FolderType
                 };
 
                 root.AddChild(methodsFolder);
-                AddPredefinedNode(SystemContext, methodsFolder);
+                AddPredefinedNode(context, methodsFolder);
                 predefinedNodes.Add(methodsFolder);
 
-                // Create OPC UA Methods in Methods folder (11 methods from PDF)
-                CreateMethod(methodsFolder, "StartMachine", "Starts the beverage filling machine", predefinedNodes);
-                CreateMethod(methodsFolder, "StopMachine", "Stops the beverage filling machine", predefinedNodes);
-                CreateMethod(methodsFolder, "EmergencyStop", "Emergency stop of the machine", predefinedNodes);
-                CreateMethod(methodsFolder, "EnterMaintenanceMode", "Puts machine into maintenance mode", predefinedNodes);
+                // Create methods
+                CreateMethod(methodsFolder, "StartMachine", "Starts the machine", predefinedNodes);
+                CreateMethod(methodsFolder, "StopMachine", "Stops the machine", predefinedNodes);
+                CreateMethod(methodsFolder, "EnterMaintenanceMode", "Enters maintenance mode", predefinedNodes);
                 CreateMethod(methodsFolder, "StartCIPCycle", "Starts Clean-in-Place cycle", predefinedNodes);
                 CreateMethod(methodsFolder, "StartSIPCycle", "Starts Sterilize-in-Place cycle", predefinedNodes);
-                CreateMethod(methodsFolder, "ResetCounters", "Resets all production counters", predefinedNodes);
+                CreateMethod(methodsFolder, "ResetCounters", "Resets production counters", predefinedNodes);
+                CreateMethod(methodsFolder, "EmergencyStop", "Emergency stop", predefinedNodes);
                 CreateMethod(methodsFolder, "GenerateLotNumber", "Generates new lot number", predefinedNodes);
 
-                // Production control methods with parameters
-                CreateMethodWithParameters(methodsFolder, "AdjustFillVolume", "Adjusts target fill volume", predefinedNodes,
+                CreateMethodWithParameters(methodsFolder, "AdjustFillVolume", "Adjusts fill volume", predefinedNodes,
                     new List<Argument> {
-                        new Argument("newFillVolume", DataTypeIds.Double, ValueRanks.Scalar, "New target fill volume in ml")
+                        new Argument("newFillVolume", DataTypeIds.Double, ValueRanks.Scalar, "New fill volume in ml")
                     });
 
-                CreateMethodWithParameters(methodsFolder, "LoadProductionOrder", "Loads new production order", predefinedNodes,
+                CreateMethodWithParameters(methodsFolder, "LoadProductionOrder", "Loads a new production order", predefinedNodes,
                     new List<Argument> {
                         new Argument("orderNumber", DataTypeIds.String, ValueRanks.Scalar, "Production order number"),
                         new Argument("article", DataTypeIds.String, ValueRanks.Scalar, "Article code"),
-                        new Argument("quantity", DataTypeIds.UInt32, ValueRanks.Scalar, "Order quantity"),
-                        new Argument("targetFillVolume", DataTypeIds.Double, ValueRanks.Scalar, "Target fill volume in ml"),
-                        new Argument("targetLineSpeed", DataTypeIds.Double, ValueRanks.Scalar, "Target line speed BPM"),
+                        new Argument("quantity", DataTypeIds.UInt32, ValueRanks.Scalar, "Target quantity"),
+                        new Argument("targetFillVolume", DataTypeIds.Double, ValueRanks.Scalar, "Target fill volume"),
+                        new Argument("targetLineSpeed", DataTypeIds.Double, ValueRanks.Scalar, "Target line speed"),
                         new Argument("targetProductTemp", DataTypeIds.Double, ValueRanks.Scalar, "Target product temperature"),
                         new Argument("targetCO2Pressure", DataTypeIds.Double, ValueRanks.Scalar, "Target CO2 pressure"),
                         new Argument("targetCapTorque", DataTypeIds.Double, ValueRanks.Scalar, "Target cap torque"),
@@ -164,148 +111,133 @@ namespace OpcServer
             }
         }
 
-        private void CreateMethodWithParameters(FolderState parent, string name, string description, NodeStateCollection predefinedNodes, List<Argument> inputArguments)
+        private void CreateVariablesFromProperties(FolderState parent, NodeStateCollection predefinedNodes)
         {
-            try
+            var properties = typeof(BeverageFillingLineMachine).GetProperties(BindingFlags.Public | BindingFlags.Instance);
+
+            foreach (var prop in properties)
             {
-                var method = new MethodState(parent)
-                {
-                    NodeId = new NodeId(name, NamespaceIndex),
-                    BrowseName = new QualifiedName(name, NamespaceIndex),
-                    DisplayName = new LocalizedText(name),
-                    Description = new LocalizedText(description),
-                    Executable = true,
-                    UserExecutable = true
-                };
+                var value = prop.GetValue(_machine);
+                if (value == null) continue;
 
-                // Set input arguments
-                method.InputArguments = new PropertyState<Argument[]>(method)
-                {
-                    NodeId = new NodeId(name + "_InputArguments", NamespaceIndex),
-                    BrowseName = BrowseNames.InputArguments,
-                    DisplayName = BrowseNames.InputArguments,
-                    TypeDefinitionId = VariableTypeIds.PropertyType,
-                    ReferenceTypeId = ReferenceTypes.HasProperty,
-                    DataType = DataTypeIds.Argument,
-                    ValueRank = ValueRanks.OneDimension,
-                    Value = inputArguments.ToArray()
-                };
+                NodeId dataType = GetOpcDataType(prop.PropertyType);
+                if (dataType == null) continue; // Skip unsupported types
 
-                method.OnCallMethod = new GenericMethodCalledEventHandler(OnCallMethod);
+                bool isArray = prop.PropertyType.IsArray || (prop.PropertyType.IsGenericType && prop.PropertyType.GetGenericTypeDefinition() == typeof(List<>));
 
-                // Add reference from parent to method
-                parent.AddChild(method);
-
-                // Add to predefined nodes so it gets processed
-                AddPredefinedNode(SystemContext, method);
-                predefinedNodes.Add(method);
-
-                // Add explicit reference for method visibility
-                method.AddReference(ReferenceTypes.HasComponent, true, parent.NodeId);
-
+                if (isArray)
+                    CreateArrayVariable(parent, prop.Name, dataType, value, predefinedNodes);
+                else
+                    CreateVariable(parent, prop.Name, dataType, value, predefinedNodes);
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"❌ Failed to create method {name}: {ex.Message}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
-                throw;
-            }
+        }
+
+        private NodeId GetOpcDataType(Type type)
+        {
+            if (type == typeof(string)) return DataTypeIds.String;
+            if (type == typeof(double)) return DataTypeIds.Double;
+            if (type == typeof(uint)) return DataTypeIds.UInt32;
+            if (type == typeof(DateTime)) return DataTypeIds.DateTime;
+            if (type == typeof(string[])) return DataTypeIds.String;
+            if (type == typeof(List<string>)) return DataTypeIds.String;
+            return null;
         }
 
         private void CreateMethod(FolderState parent, string name, string description, NodeStateCollection predefinedNodes)
         {
-            try
+            var method = new MethodState(parent)
             {
-                var method = new MethodState(parent)
-                {
-                    NodeId = new NodeId(name, NamespaceIndex),
-                    BrowseName = new QualifiedName(name, NamespaceIndex),
-                    DisplayName = new LocalizedText(name),
-                    Description = new LocalizedText(description),
-                    Executable = true,
-                    UserExecutable = true
-                };
+                NodeId = new NodeId(name, NamespaceIndex),
+                BrowseName = new QualifiedName(name, NamespaceIndex),
+                DisplayName = new LocalizedText(name),
+                Description = new LocalizedText(description),
+                Executable = true,
+                UserExecutable = true,
+                OnCallMethod = new GenericMethodCalledEventHandler(OnCallMethod)
+            };
 
-                method.OnCallMethod = new GenericMethodCalledEventHandler(OnCallMethod);
+            parent.AddChild(method);
+            AddPredefinedNode(SystemContext, method);
+            predefinedNodes.Add(method);
+            method.AddReference(ReferenceTypes.HasComponent, true, parent.NodeId);
+        }
 
-                // Add reference from parent to method
-                parent.AddChild(method);
-
-                // Add to predefined nodes so it gets processed
-                AddPredefinedNode(SystemContext, method);
-                predefinedNodes.Add(method);
-
-                // Add explicit reference for method visibility
-                method.AddReference(ReferenceTypes.HasComponent, true, parent.NodeId);
-
-            }
-            catch (Exception ex)
+        private void CreateMethodWithParameters(FolderState parent, string name, string description,
+            NodeStateCollection predefinedNodes, List<Argument> inputArguments)
+        {
+            var method = new MethodState(parent)
             {
-                Console.WriteLine($"❌ Failed to create method {name}: {ex.Message}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
-                throw;
-            }
+                NodeId = new NodeId(name, NamespaceIndex),
+                BrowseName = new QualifiedName(name, NamespaceIndex),
+                DisplayName = new LocalizedText(name),
+                Description = new LocalizedText(description),
+                Executable = true,
+                UserExecutable = true
+            };
+
+            method.InputArguments = new PropertyState<Argument[]>(method)
+            {
+                NodeId = new NodeId(name + "_InputArguments", NamespaceIndex),
+                BrowseName = BrowseNames.InputArguments,
+                DisplayName = BrowseNames.InputArguments,
+                TypeDefinitionId = VariableTypeIds.PropertyType,
+                ReferenceTypeId = ReferenceTypes.HasProperty,
+                DataType = DataTypeIds.Argument,
+                ValueRank = ValueRanks.OneDimension,
+                Value = inputArguments.ToArray()
+            };
+
+            method.OnCallMethod = new GenericMethodCalledEventHandler(OnCallMethod);
+
+            parent.AddChild(method);
+            AddPredefinedNode(SystemContext, method);
+            predefinedNodes.Add(method);
+            method.AddReference(ReferenceTypes.HasComponent, true, parent.NodeId);
         }
 
         private void CreateArrayVariable(FolderState parent, string name, NodeId dataType, object initialValue, NodeStateCollection predefinedNodes)
         {
-            try
+            var variable = new BaseDataVariableState(parent)
             {
-                var variable = new BaseDataVariableState(parent)
-                {
-                    NodeId = new NodeId(name, NamespaceIndex),
-                    BrowseName = new QualifiedName(name, NamespaceIndex),
-                    DisplayName = new LocalizedText(name),
-                    TypeDefinitionId = VariableTypeIds.BaseDataVariableType,
-                    DataType = dataType,
-                    ValueRank = ValueRanks.OneDimension,
-                    ArrayDimensions = new ReadOnlyList<uint>(new List<uint> { 0 }),
-                    AccessLevel = AccessLevels.CurrentRead,
-                    UserAccessLevel = AccessLevels.CurrentRead,
-                    Value = initialValue,
-                    StatusCode = StatusCodes.Good,
-                    Timestamp = DateTime.UtcNow
-                };
+                NodeId = new NodeId(name, NamespaceIndex),
+                BrowseName = new QualifiedName(name, NamespaceIndex),
+                DisplayName = new LocalizedText(name),
+                TypeDefinitionId = VariableTypeIds.BaseDataVariableType,
+                DataType = dataType,
+                ValueRank = ValueRanks.OneDimension,
+                ArrayDimensions = new ReadOnlyList<uint>(new List<uint> { 0 }),
+                AccessLevel = AccessLevels.CurrentRead,
+                UserAccessLevel = AccessLevels.CurrentRead,
+                Value = initialValue,
+                StatusCode = StatusCodes.Good,
+                Timestamp = DateTime.UtcNow
+            };
 
-                parent.AddChild(variable);
-                predefinedNodes.Add(variable);
-                _variables[name] = variable;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Failed to create array variable {name}: {ex.Message}");
-                throw;
-            }
+            parent.AddChild(variable);
+            predefinedNodes.Add(variable);
+            _variables[name] = variable;
         }
 
         private void CreateVariable(FolderState parent, string name, NodeId dataType, object initialValue, NodeStateCollection predefinedNodes)
         {
-            try
+            var variable = new BaseDataVariableState(parent)
             {
-                var variable = new BaseDataVariableState(parent)
-                {
-                    NodeId = new NodeId(name, NamespaceIndex),
-                    BrowseName = new QualifiedName(name, NamespaceIndex),
-                    DisplayName = new LocalizedText(name),
-                    TypeDefinitionId = VariableTypeIds.BaseDataVariableType,
-                    DataType = dataType,
-                    ValueRank = ValueRanks.Scalar,
-                    AccessLevel = AccessLevels.CurrentRead,
-                    UserAccessLevel = AccessLevels.CurrentRead,
-                    Value = initialValue,
-                    StatusCode = StatusCodes.Good,
-                    Timestamp = DateTime.UtcNow
-                };
+                NodeId = new NodeId(name, NamespaceIndex),
+                BrowseName = new QualifiedName(name, NamespaceIndex),
+                DisplayName = new LocalizedText(name),
+                TypeDefinitionId = VariableTypeIds.BaseDataVariableType,
+                DataType = dataType,
+                ValueRank = ValueRanks.Scalar,
+                AccessLevel = AccessLevels.CurrentRead,
+                UserAccessLevel = AccessLevels.CurrentRead,
+                Value = initialValue,
+                StatusCode = StatusCodes.Good,
+                Timestamp = DateTime.UtcNow
+            };
 
-                parent.AddChild(variable);
-                predefinedNodes.Add(variable);
-                _variables[name] = variable;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Failed to create variable {name}: {ex.Message}");
-                throw;
-            }
+            parent.AddChild(variable);
+            predefinedNodes.Add(variable);
+            _variables[name] = variable;
         }
 
         private void UpdateOpcVariables(object state)
@@ -314,63 +246,22 @@ namespace OpcServer
             {
                 lock (Lock)
                 {
-                    // Machine Identification (static, but update for consistency)
-                    UpdateVariable("MachineName", _machine.MachineName);
-                    UpdateVariable("MachineSerialNumber", _machine.MachineSerialNumber);
-                    UpdateVariable("Plant", _machine.Plant);
-                    UpdateVariable("ProductionSegment", _machine.ProductionSegment);
-                    UpdateVariable("ProductionLine", _machine.ProductionLine);
+                    var properties = typeof(BeverageFillingLineMachine).GetProperties(BindingFlags.Public | BindingFlags.Instance);
 
-                    // Production Order
-                    UpdateVariable("ProductionOrder", _machine.ProductionOrder);
-                    UpdateVariable("Article", _machine.Article);
-                    UpdateVariable("Quantity", _machine.Quantity);
-                    UpdateVariable("CurrentLotNumber", _machine.CurrentLotNumber);
-                    UpdateVariable("ExpirationDate", _machine.ExpirationDate);
+                    foreach (var prop in properties)
+                    {
+                        // Skip static properties
+                        if (_staticProperties.Contains(prop.Name))
+                            continue;
 
-                    // Target Values
-                    UpdateVariable("TargetFillVolume", _machine.TargetFillVolume);
-                    UpdateVariable("TargetLineSpeed", _machine.TargetLineSpeed);
-                    UpdateVariable("TargetProductTemperature", _machine.TargetProductTemperature);
-                    UpdateVariable("TargetCO2Pressure", _machine.TargetCO2Pressure);
-                    UpdateVariable("TargetCapTorque", _machine.TargetCapTorque);
-                    UpdateVariable("TargetCycleTime", _machine.TargetCycleTime);
-
-                    // Actual Values (dynamic)
-                    UpdateVariable("ActualFillVolume", _machine.ActualFillVolume);
-                    UpdateVariable("ActualLineSpeed", _machine.ActualLineSpeed);
-                    UpdateVariable("ActualProductTemperature", _machine.ActualProductTemperature);
-                    UpdateVariable("ActualCO2Pressure", _machine.ActualCO2Pressure);
-                    UpdateVariable("ActualCapTorque", _machine.ActualCapTorque);
-                    UpdateVariable("ActualCycleTime", _machine.ActualCycleTime);
-                    UpdateVariable("FillAccuracyDeviation", _machine.FillAccuracyDeviation);
-
-                    // System Status (dynamic)
-                    UpdateVariable("MachineStatus", _machine.MachineStatus);
-                    UpdateVariable("CurrentStation", _machine.CurrentStation);
-                    UpdateVariable("ProductLevelTank", _machine.ProductLevelTank);
-                    UpdateVariable("CleaningCycleStatus", _machine.CleaningCycleStatus);
-                    UpdateVariable("QualityCheckWeight", _machine.QualityCheckWeight);
-                    UpdateVariable("QualityCheckLevel", _machine.QualityCheckLevel);
-
-                    // Counters - Global (dynamic)
-                    UpdateVariable("GoodBottles", _machine.GoodBottles);
-                    UpdateVariable("BadBottlesVolume", _machine.BadBottlesVolume);
-                    UpdateVariable("BadBottlesWeight", _machine.BadBottlesWeight);
-                    UpdateVariable("BadBottlesCap", _machine.BadBottlesCap);
-                    UpdateVariable("BadBottlesOther", _machine.BadBottlesOther);
-                    UpdateVariable("TotalBadBottles", _machine.TotalBadBottles);
-                    UpdateVariable("TotalBottles", _machine.TotalBottles);
-
-                    // Counters - Current Order (dynamic)
-                    UpdateVariable("GoodBottlesOrder", _machine.GoodBottlesOrder);
-                    UpdateVariable("BadBottlesOrder", _machine.BadBottlesOrder);
-                    UpdateVariable("TotalBottlesOrder", _machine.TotalBottlesOrder);
-                    UpdateVariable("ProductionOrderProgress", _machine.ProductionOrderProgress);
-
-                    // Alarms (dynamic)
-                    UpdateVariable("ActiveAlarms", _machine.ActiveAlarms.ToArray());
-                    UpdateVariable("AlarmCount", (uint)_machine.ActiveAlarms.Count);
+                        var value = prop.GetValue(_machine);
+                        if (value != null && _variables.ContainsKey(prop.Name))
+                        {
+                            _variables[prop.Name].Value = value;
+                            _variables[prop.Name].Timestamp = DateTime.UtcNow;
+                            _variables[prop.Name].ClearChangeMasks(SystemContext, false);
+                        }
+                    }
                 }
             }
             catch (Exception ex)
@@ -379,23 +270,11 @@ namespace OpcServer
             }
         }
 
-        private void UpdateVariable(string name, object value)
-        {
-            if (_variables.ContainsKey(name))
-            {
-                _variables[name].Value = value;
-                _variables[name].Timestamp = DateTime.UtcNow;
-                _variables[name].ClearChangeMasks(SystemContext, false);
-            }
-        }
-
         private ServiceResult OnCallMethod(ISystemContext context, MethodState method, IList<object> inputArguments, IList<object> outputArguments)
         {
             try
             {
-                string methodName = method.BrowseName.Name;
-
-                switch (methodName)
+                switch (method.BrowseName.Name)
                 {
                     case "StartMachine":
                         _machine.StartMachine();
@@ -430,53 +309,41 @@ namespace OpcServer
                         break;
 
                     case "AdjustFillVolume":
-                        if (inputArguments != null && inputArguments.Count > 0)
-                        {
-                            double newFillVolume = Convert.ToDouble(inputArguments[0]);
-                            _machine.AdjustFillVolume(newFillVolume);
-                        }
+                        if (inputArguments?.Count > 0)
+                            _machine.AdjustFillVolume(Convert.ToDouble(inputArguments[0]));
                         else
-                        {
                             return StatusCodes.BadArgumentsMissing;
-                        }
                         break;
 
                     case "LoadProductionOrder":
-                        if (inputArguments != null && inputArguments.Count >= 9)
+                        if (inputArguments?.Count >= 9)
                         {
-                            string orderNumber = Convert.ToString(inputArguments[0]);
-                            string article = Convert.ToString(inputArguments[1]);
-                            uint quantity = Convert.ToUInt32(inputArguments[2]);
-                            double targetFillVolume = Convert.ToDouble(inputArguments[3]);
-                            double targetLineSpeed = Convert.ToDouble(inputArguments[4]);
-                            double targetProductTemp = Convert.ToDouble(inputArguments[5]);
-                            double targetCO2Pressure = Convert.ToDouble(inputArguments[6]);
-                            double targetCapTorque = Convert.ToDouble(inputArguments[7]);
-                            double targetCycleTime = Convert.ToDouble(inputArguments[8]);
-
-                            _machine.LoadProductionOrder(orderNumber, article, quantity, targetFillVolume,
-                                targetLineSpeed, targetProductTemp, targetCO2Pressure, targetCapTorque, targetCycleTime);
+                            _machine.LoadProductionOrder(
+                                Convert.ToString(inputArguments[0]),
+                                Convert.ToString(inputArguments[1]),
+                                Convert.ToUInt32(inputArguments[2]),
+                                Convert.ToDouble(inputArguments[3]),
+                                Convert.ToDouble(inputArguments[4]),
+                                Convert.ToDouble(inputArguments[5]),
+                                Convert.ToDouble(inputArguments[6]),
+                                Convert.ToDouble(inputArguments[7]),
+                                Convert.ToDouble(inputArguments[8]));
                         }
                         else
-                        {
                             return StatusCodes.BadArgumentsMissing;
-                        }
                         break;
 
                     case "ChangeProduct":
-                        if (inputArguments != null && inputArguments.Count >= 4)
+                        if (inputArguments?.Count >= 4)
                         {
-                            string newArticle = Convert.ToString(inputArguments[0]);
-                            double newTargetFillVolume = Convert.ToDouble(inputArguments[1]);
-                            double newTargetProductTemp = Convert.ToDouble(inputArguments[2]);
-                            double newTargetCO2Pressure = Convert.ToDouble(inputArguments[3]);
-
-                            _machine.ChangeProduct(newArticle, newTargetFillVolume, newTargetProductTemp, newTargetCO2Pressure);
+                            _machine.ChangeProduct(
+                                Convert.ToString(inputArguments[0]),
+                                Convert.ToDouble(inputArguments[1]),
+                                Convert.ToDouble(inputArguments[2]),
+                                Convert.ToDouble(inputArguments[3]));
                         }
                         else
-                        {
                             return StatusCodes.BadArgumentsMissing;
-                        }
                         break;
 
                     default:
