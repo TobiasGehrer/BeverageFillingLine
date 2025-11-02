@@ -101,6 +101,7 @@ namespace OpcServer
                 try
                 {
                     bool certOK = await application.CheckApplicationInstanceCertificates(false, 0);
+
                     if (!certOK)
                     {
                         await application.CheckApplicationInstanceCertificates(true, 2048);
@@ -120,11 +121,7 @@ namespace OpcServer
 
                 // Create a TaskCompletionSource to keep the app running
                 var tcs = new TaskCompletionSource<bool>();
-                Console.CancelKeyPress += (sender, e) =>
-                {
-                    e.Cancel = true;
-                    tcs.SetResult(true);
-                };
+                Console.CancelKeyPress += (sender, e) => { e.Cancel = true; tcs.SetResult(true); };
 
                 // Wait until cancellation
                 await tcs.Task;

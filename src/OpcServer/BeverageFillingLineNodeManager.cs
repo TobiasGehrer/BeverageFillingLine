@@ -15,10 +15,7 @@ namespace OpcServer
         {
             _machine = machine;
             _variables = new Dictionary<string, BaseDataVariableState>();
-            _staticProperties = new HashSet<string>
-            {
-                "MachineName", "MachineSerialNumber", "Plant", "ProductionSegment", "ProductionLine"
-            };
+            _staticProperties = new HashSet<string> { "MachineName", "MachineSerialNumber", "Plant", "ProductionSegment", "ProductionLine" };
             SetNamespaces("urn:BeverageServer:");
         }
 
@@ -27,7 +24,7 @@ namespace OpcServer
             lock (Lock)
             {
                 LoadPredefinedNodes(SystemContext, externalReferences);
-                _updateTimer = new Timer(UpdateOpcVariables, null, 0, 1000); // 1 second updates
+                _updateTimer = new Timer(UpdateOpcVariables, null, 0, 1000);
             }
         }
 
@@ -36,8 +33,7 @@ namespace OpcServer
             NodeStateCollection predefinedNodes = new NodeStateCollection();
 
             try
-            {
-                // Create root folder
+            {                
                 FolderState root = new FolderState(null)
                 {
                     NodeId = new NodeId("BeverageFillingLine", NamespaceIndex),
@@ -52,8 +48,7 @@ namespace OpcServer
 
                 // Auto-create variables from machine properties
                 CreateVariablesFromProperties(root, predefinedNodes);
-
-                // Create methods folder
+                
                 FolderState methodsFolder = new FolderState(root)
                 {
                     NodeId = new NodeId("Methods", NamespaceIndex),
@@ -76,13 +71,11 @@ namespace OpcServer
                 CreateMethod(methodsFolder, "EmergencyStop", "Emergency stop", predefinedNodes);
                 CreateMethod(methodsFolder, "GenerateLotNumber", "Generates new lot number", predefinedNodes);
 
-                CreateMethodWithParameters(methodsFolder, "AdjustFillVolume", "Adjusts fill volume", predefinedNodes,
-                    new List<Argument> {
+                CreateMethodWithParameters(methodsFolder, "AdjustFillVolume", "Adjusts fill volume", predefinedNodes, new List<Argument> {
                         new Argument("newFillVolume", DataTypeIds.Double, ValueRanks.Scalar, "New fill volume in ml")
                     });
 
-                CreateMethodWithParameters(methodsFolder, "LoadProductionOrder", "Loads a new production order", predefinedNodes,
-                    new List<Argument> {
+                CreateMethodWithParameters(methodsFolder, "LoadProductionOrder", "Loads a new production order", predefinedNodes, new List<Argument> {
                         new Argument("orderNumber", DataTypeIds.String, ValueRanks.Scalar, "Production order number"),
                         new Argument("article", DataTypeIds.String, ValueRanks.Scalar, "Article code"),
                         new Argument("quantity", DataTypeIds.UInt32, ValueRanks.Scalar, "Target quantity"),
@@ -94,8 +87,7 @@ namespace OpcServer
                         new Argument("targetCycleTime", DataTypeIds.Double, ValueRanks.Scalar, "Target cycle time")
                     });
 
-                CreateMethodWithParameters(methodsFolder, "ChangeProduct", "Changes product specifications", predefinedNodes,
-                    new List<Argument> {
+                CreateMethodWithParameters(methodsFolder, "ChangeProduct", "Changes product specifications", predefinedNodes, new List<Argument> {
                         new Argument("newArticle", DataTypeIds.String, ValueRanks.Scalar, "New article code"),
                         new Argument("newTargetFillVolume", DataTypeIds.Double, ValueRanks.Scalar, "New target fill volume"),
                         new Argument("newTargetProductTemp", DataTypeIds.Double, ValueRanks.Scalar, "New target product temperature"),
@@ -118,28 +110,63 @@ namespace OpcServer
             foreach (var prop in properties)
             {
                 var value = prop.GetValue(_machine);
-                if (value == null) continue;
+                if (value == null)
+                {
+                    continue;
+                }
 
                 NodeId dataType = GetOpcDataType(prop.PropertyType);
-                if (dataType == null) continue; // Skip unsupported types
+
+                if (dataType == null)
+                {
+                    continue;
+                }
 
                 bool isArray = prop.PropertyType.IsArray || (prop.PropertyType.IsGenericType && prop.PropertyType.GetGenericTypeDefinition() == typeof(List<>));
 
                 if (isArray)
+                {
                     CreateArrayVariable(parent, prop.Name, dataType, value, predefinedNodes);
+                }
                 else
+                {
                     CreateVariable(parent, prop.Name, dataType, value, predefinedNodes);
+                }
             }
         }
 
         private NodeId GetOpcDataType(Type type)
         {
-            if (type == typeof(string)) return DataTypeIds.String;
-            if (type == typeof(double)) return DataTypeIds.Double;
-            if (type == typeof(uint)) return DataTypeIds.UInt32;
-            if (type == typeof(DateTime)) return DataTypeIds.DateTime;
-            if (type == typeof(string[])) return DataTypeIds.String;
-            if (type == typeof(List<string>)) return DataTypeIds.String;
+            if (type == typeof(string))
+            {
+                return DataTypeIds.String;
+            }
+
+            if (type == typeof(double))
+            {
+                return DataTypeIds.Double;
+            }
+
+            if (type == typeof(uint))
+            {
+                return DataTypeIds.UInt32;
+            }
+
+            if (type == typeof(DateTime))
+            {
+                return DataTypeIds.DateTime;
+            }
+
+            if (type == typeof(string[]))
+            {
+                return DataTypeIds.String;
+            }
+
+            if (type == typeof(List<string>))
+            {
+                return DataTypeIds.String;
+            }
+
             return null;
         }
 
@@ -249,12 +276,14 @@ namespace OpcServer
                     var properties = typeof(BeverageFillingLineMachine).GetProperties(BindingFlags.Public | BindingFlags.Instance);
 
                     foreach (var prop in properties)
-                    {
-                        // Skip static properties
+                    {                        
                         if (_staticProperties.Contains(prop.Name))
+                        {
                             continue;
+                        }
 
                         var value = prop.GetValue(_machine);
+
                         if (value != null && _variables.ContainsKey(prop.Name))
                         {
                             _variables[prop.Name].Value = value;
@@ -310,9 +339,13 @@ namespace OpcServer
 
                     case "AdjustFillVolume":
                         if (inputArguments?.Count > 0)
+                        {
                             _machine.AdjustFillVolume(Convert.ToDouble(inputArguments[0]));
+                        }
                         else
+                        {
                             return StatusCodes.BadArgumentsMissing;
+                        }
                         break;
 
                     case "LoadProductionOrder":
@@ -330,7 +363,9 @@ namespace OpcServer
                                 Convert.ToDouble(inputArguments[8]));
                         }
                         else
+                        {
                             return StatusCodes.BadArgumentsMissing;
+                        }
                         break;
 
                     case "ChangeProduct":
@@ -343,7 +378,9 @@ namespace OpcServer
                                 Convert.ToDouble(inputArguments[3]));
                         }
                         else
+                        {
                             return StatusCodes.BadArgumentsMissing;
+                        }
                         break;
 
                     default:

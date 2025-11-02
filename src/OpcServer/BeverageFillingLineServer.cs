@@ -35,7 +35,7 @@ namespace OpcServer
                 var nodeManager = new BeverageFillingLineNodeManager(server, configuration, _machine);
                 var masterNodeManager = new MasterNodeManager(server, configuration, null, nodeManager);
 
-                // Start simulation timer - 1 second interval (aligned with OPC updates)
+                // Start simulation timer - 1 second interval
                 _simulationTimer = new Timer(UpdateSimulation, null, 1000, 1000);
 
                 Console.WriteLine("Node manager created successfully");
@@ -67,6 +67,7 @@ namespace OpcServer
             {
                 _simulationTimer?.Dispose();
             }
+
             base.Dispose(disposing);
         }
     }
