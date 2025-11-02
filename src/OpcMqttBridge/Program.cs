@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Collections.Concurrent;
 
 namespace OpcMqttBridge
 {
@@ -6,7 +7,13 @@ namespace OpcMqttBridge
     {
         private static OpcUaClient? _opcUaClient;
         private static MqttPublisher? _mqttPublisher;
-        private static Timer? _publishTimer;
+        private static CancellationTokenSource? _cts;
+
+        // Thread-safe queue for batching messages
+        private static readonly ConcurrentQueue<PendingMessage> _messageQueue = new();
+        private static Timer? _batchTimer;
+        private static int _publishedCount = 0;
+        private static DateTime _lastStatsTime = DateTime.UtcNow;
 
         // UNS Configuration - adjust these to match your organization
         private const string Version = "v1";
@@ -17,8 +24,18 @@ namespace OpcMqttBridge
 
         static async Task Main(string[] args)
         {
-            Console.WriteLine("=== OPC UA to MQTT Bridge Agent ===");
+            Console.WriteLine("=== OPC UA to MQTT Bridge (Subscription-Based) ===");
             Console.WriteLine("Connecting beverage filling line to MQTT broker...\n");
+
+            _cts = new CancellationTokenSource();
+
+            // Handle graceful shutdown
+            Console.CancelKeyPress += (sender, e) =>
+            {
+                e.Cancel = true;
+                Console.WriteLine("\n\nShutdown requested...");
+                _cts?.Cancel();
+            };
 
             try
             {
@@ -26,89 +43,257 @@ namespace OpcMqttBridge
                 string opcServerUrl = Environment.GetEnvironmentVariable("OPC_SERVER_URL") ?? "opc.tcp://localhost:4840";
                 string mqttBroker = Environment.GetEnvironmentVariable("MQTT_BROKER") ?? "localhost";
                 int mqttPort = int.Parse(Environment.GetEnvironmentVariable("MQTT_PORT") ?? "1883");
+                int publishingInterval = int.Parse(Environment.GetEnvironmentVariable("OPC_PUBLISHING_INTERVAL") ?? "1000");
+                int batchIntervalMs = int.Parse(Environment.GetEnvironmentVariable("MQTT_BATCH_INTERVAL") ?? "100");
 
-                Console.WriteLine($"Connecting to OPC Server: {opcServerUrl}");
-                Console.WriteLine($"Connecting to MQTT Broker: {mqttBroker}:{mqttPort}\n");
+                Console.WriteLine($"OPC Server: {opcServerUrl}");
+                Console.WriteLine($"MQTT Broker: {mqttBroker}:{mqttPort}");
+                Console.WriteLine($"OPC Publishing Interval: {publishingInterval}ms");
+                Console.WriteLine($"MQTT Batch Interval: {batchIntervalMs}ms\n");
 
                 // Initialize OPC UA client
                 _opcUaClient = new OpcUaClient(opcServerUrl, "OpcMqttBridge");
-                await _opcUaClient.ConnectAsync();
-                Console.WriteLine("Connected to OPC UA server");
+                await ConnectOpcWithRetry(_cts.Token);
 
                 // Initialize MQTT publisher
                 _mqttPublisher = new MqttPublisher(mqttBroker, mqttPort, "beverage-filling-line-bridge");
-                await _mqttPublisher.ConnectAsync();
-                Console.WriteLine("Connected to MQTT broker\n");
+                await ConnectMqttWithRetry(_cts.Token);
 
-                // Start periodic publishing
-                _publishTimer = new Timer(async _ => await PublishAllDataAsync(), null, TimeSpan.Zero, TimeSpan.FromSeconds(3));
+                // Subscribe to value changes
+                _opcUaClient.ValueChanged += OnOpcValueChanged;
 
-                Console.WriteLine("Bridge active. Publishing every 3 seconds...");
-                Console.WriteLine($"UNS Base Topic: {Version}/{Enterprise}/{Site}/{Area}/{Line}");
+                // Create OPC UA subscription
+                await _opcUaClient.CreateSubscriptionAsync(publishingInterval);
+
+                Console.WriteLine("✓ Subscription-based bridge active!");
+                Console.WriteLine($"✓ UNS Base Topic: {Version}/{Enterprise}/{Site}/{Area}/{Line}");
+                Console.WriteLine("✓ Publishing only when values change\n");
                 Console.WriteLine("Press Ctrl+C to stop.\n");
 
-                // Keep running
-                await Task.Delay(Timeout.Infinite);
+                // Start batch publishing timer
+                _batchTimer = new Timer(PublishBatchedMessages, null,
+                    TimeSpan.FromMilliseconds(batchIntervalMs),
+                    TimeSpan.FromMilliseconds(batchIntervalMs));
+
+                // Keep running and monitor connection
+                await MonitorConnectionAsync(_cts.Token);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error: {ex.Message}");
+                Console.WriteLine($"Fatal error: {ex.Message}");
+                Console.WriteLine(ex.StackTrace);
             }
             finally
             {
-                _publishTimer?.Dispose();
-                if (_mqttPublisher != null)
-                {
-                    await _mqttPublisher.DisconnectAsync();
-                }
-                if (_opcUaClient != null)
-                {
-                    await _opcUaClient.DisconnectAsync();
-                }
-
-                // Give time for cleanup
-                await Task.Delay(500);
+                await CleanupAsync();
             }
         }
 
-        private static async Task PublishAllDataAsync()
+        private static async Task ConnectOpcWithRetry(CancellationToken cancellationToken)
+        {
+            int retryCount = 0;
+            int maxRetries = 10;
+            int delaySeconds = 5;
+
+            while (!cancellationToken.IsCancellationRequested && retryCount < maxRetries)
+            {
+                try
+                {
+                    await _opcUaClient!.ConnectAsync();
+                    Console.WriteLine("✓ Connected to OPC UA server\n");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    retryCount++;
+                    Console.WriteLine($"✗ Failed to connect to OPC UA server (attempt {retryCount}/{maxRetries}): {ex.Message}");
+
+                    if (retryCount < maxRetries)
+                    {
+                        Console.WriteLine($"  Retrying in {delaySeconds} seconds...");
+                        await Task.Delay(TimeSpan.FromSeconds(delaySeconds), cancellationToken);
+                        delaySeconds = Math.Min(delaySeconds * 2, 60); // Exponential backoff
+                    }
+                    else
+                    {
+                        throw;
+                    }
+                }
+            }
+        }
+
+        private static async Task ConnectMqttWithRetry(CancellationToken cancellationToken)
+        {
+            int retryCount = 0;
+            int maxRetries = 10;
+            int delaySeconds = 5;
+
+            while (!cancellationToken.IsCancellationRequested && retryCount < maxRetries)
+            {
+                try
+                {
+                    await _mqttPublisher!.ConnectAsync();
+                    Console.WriteLine("✓ Connected to MQTT broker\n");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    retryCount++;
+                    Console.WriteLine($"✗ Failed to connect to MQTT broker (attempt {retryCount}/{maxRetries}): {ex.Message}");
+
+                    if (retryCount < maxRetries)
+                    {
+                        Console.WriteLine($"  Retrying in {delaySeconds} seconds...");
+                        await Task.Delay(TimeSpan.FromSeconds(delaySeconds), cancellationToken);
+                        delaySeconds = Math.Min(delaySeconds * 2, 60); // Exponential backoff
+                    }
+                    else
+                    {
+                        throw;
+                    }
+                }
+            }
+        }
+
+        private static void OnOpcValueChanged(object? sender, ValueChangedEventArgs e)
         {
             try
             {
-                var timestamp = DateTime.UtcNow;
+                // Map OPC variable name to MQTT topic
+                var topicMapping = GetTopicMappings().FirstOrDefault(m => m.OpcVariable == e.NodeName);
 
-                // Read all OPC UA variables
-                var machineData = await _opcUaClient!.ReadAllVariablesAsync();
-
-                // Publish each variable individually following UNS structure
-                int publishCount = 0;
-                foreach (var mapping in GetTopicMappings())
+                if (topicMapping != null)
                 {
-                    if (machineData.TryGetValue(mapping.OpcVariable, out var value))
+                    // Add to queue for batched publishing
+                    _messageQueue.Enqueue(new PendingMessage
                     {
-                        await PublishMetric(mapping.Topic, value, timestamp);
-                        publishCount++;
-                    }
+                        Topic = topicMapping.Topic,
+                        Value = e.Value,
+                        Timestamp = e.Timestamp == DateTime.MinValue ? DateTime.UtcNow : e.Timestamp
+                    });
                 }
-
-                Console.WriteLine($"[{timestamp:HH:mm:ss}] Published {publishCount} metrics to MQTT");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Publish error: {ex.Message}");
+                Console.WriteLine($"Error handling value change: {ex.Message}");
             }
         }
 
-        private static async Task PublishMetric(string topic, object value, DateTime timestamp)
+        private static async void PublishBatchedMessages(object? state)
         {
-            var payload = new
-            {
-                timestamp,
-                value
-            };
+            if (_messageQueue.IsEmpty || _mqttPublisher == null)
+                return;
 
-            var fullTopic = $"{Version}/{Enterprise}/{Site}/{Area}/{Line}/{topic}";
-            await _mqttPublisher!.PublishAsync(fullTopic, JsonSerializer.Serialize(payload));
+            var batch = new List<PendingMessage>();
+
+            // Dequeue all pending messages
+            while (_messageQueue.TryDequeue(out var message))
+            {
+                batch.Add(message);
+            }
+
+            if (batch.Count == 0)
+                return;
+
+            // Publish all messages in batch
+            var publishTasks = batch.Select(msg => PublishMetricAsync(msg.Topic, msg.Value, msg.Timestamp));
+
+            try
+            {
+                await Task.WhenAll(publishTasks);
+
+                _publishedCount += batch.Count;
+
+                // Print stats every 10 seconds
+                var elapsed = DateTime.UtcNow - _lastStatsTime;
+                if (elapsed.TotalSeconds >= 10)
+                {
+                    var rate = _publishedCount / elapsed.TotalSeconds;
+                    Console.WriteLine($"[{DateTime.UtcNow:HH:mm:ss}] Published {_publishedCount} metrics ({rate:F1} msg/s)");
+                    _publishedCount = 0;
+                    _lastStatsTime = DateTime.UtcNow;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Batch publish error: {ex.Message}");
+            }
+        }
+
+        private static async Task PublishMetricAsync(string topic, object value, DateTime timestamp)
+        {
+            try
+            {
+                var payload = new
+                {
+                    timestamp,
+                    value
+                };
+
+                var fullTopic = $"{Version}/{Enterprise}/{Site}/{Area}/{Line}/{topic}";
+                await _mqttPublisher!.PublishAsync(fullTopic, JsonSerializer.Serialize(payload));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Publish error for {topic}: {ex.Message}");
+            }
+        }
+
+        private static async Task MonitorConnectionAsync(CancellationToken cancellationToken)
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(5000, cancellationToken);
+
+                    // Check OPC connection
+                    if (_opcUaClient != null && !_opcUaClient.IsConnected())
+                    {
+                        Console.WriteLine("OPC connection lost, attempting reconnect...");
+                        await ConnectOpcWithRetry(cancellationToken);
+                        if (_opcUaClient.IsConnected())
+                        {
+                            await _opcUaClient.CreateSubscriptionAsync();
+                        }
+                    }
+
+                    // MQTT client has built-in reconnection, but we could add monitoring here too
+                }
+                catch (TaskCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Monitor error: {ex.Message}");
+                }
+            }
+        }
+
+        private static async Task CleanupAsync()
+        {
+            Console.WriteLine("\nCleaning up...");
+
+            _batchTimer?.Dispose();
+
+            // Publish remaining messages
+            PublishBatchedMessages(null);
+            await Task.Delay(500);
+
+            if (_opcUaClient != null)
+            {
+                await _opcUaClient.DisconnectAsync();
+                Console.WriteLine("✓ OPC UA client disconnected");
+            }
+
+            if (_mqttPublisher != null)
+            {
+                await _mqttPublisher.DisconnectAsync();
+                Console.WriteLine("✓ MQTT publisher disconnected");
+            }
+
+            Console.WriteLine("✓ Shutdown complete");
         }
 
         private static List<TopicMapping> GetTopicMappings()
@@ -181,5 +366,11 @@ namespace OpcMqttBridge
         }
 
         private record TopicMapping(string Topic, string OpcVariable);
+        private record PendingMessage
+        {
+            public string Topic { get; init; } = string.Empty;
+            public object Value { get; init; } = null!;
+            public DateTime Timestamp { get; init; }
+        }
     }
 }

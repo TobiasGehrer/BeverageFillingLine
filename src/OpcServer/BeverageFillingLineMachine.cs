@@ -3,11 +3,15 @@ namespace OpcServer
     public class BeverageFillingLineMachine
     {
         private Random _random = new Random();
-        private Dictionary<string, Queue<double>> _deviationHistory = new Dictionary<string, Queue<double>>();
-        private int _cycleCount = 0;      
-        private int _cyclesSinceLastError = 0;
-        private int _errorRecoveryCycles = 0;      
+        private int _cycleCount = 0;
         private DateTime _stateChangeTime = DateTime.MinValue;
+        private int _errorRecoveryCycles = 0;
+
+        // Simulation control
+        private int _cyclesSinceLastIssue = 0;
+        private string _simulationMode = "normal"; // "normal", "drift", "spike"
+        private int _driftCycles = 0;
+        private double _driftFactor = 1.0;
 
         // Machine Identification
         public string MachineName { get; set; } = "FluidFill Express #2";
@@ -50,16 +54,16 @@ namespace OpcServer
 
         // Counters - Global (since startup)
         public uint GoodBottles { get; set; } = 1247589;
-        public uint BadBottlesVolume { get; set; } = 2847;
-        public uint BadBottlesWeight { get; set; } = 1923;
-        public uint BadBottlesCap { get; set; } = 1156;
-        public uint BadBottlesOther { get; set; } = 734;
+        public uint BadBottlesVolume { get; set; } = 284;
+        public uint BadBottlesWeight { get; set; } = 192;
+        public uint BadBottlesCap { get; set; } = 115;
+        public uint BadBottlesOther { get; set; } = 73;
         public uint TotalBadBottles => BadBottlesVolume + BadBottlesWeight + BadBottlesCap + BadBottlesOther;
         public uint TotalBottles => GoodBottles + TotalBadBottles;
 
         // Counters - Current Order
         public uint GoodBottlesOrder { get; set; } = 12847;
-        public uint BadBottlesOrder { get; set; } = 153;
+        public uint BadBottlesOrder { get; set; } = 15;
         public uint TotalBottlesOrder => GoodBottlesOrder + BadBottlesOrder;
         public double ProductionOrderProgress => Quantity > 0 ? (double)TotalBottlesOrder / Quantity * 100.0 : 0.0;
 
@@ -71,8 +75,7 @@ namespace OpcServer
         public List<string> ActiveAlarms { get; set; } = new List<string>();
         public uint AlarmCount => (uint)ActiveAlarms.Count;
 
-
-        // SIMULATION
+        // SIMPLIFIED SIMULATION
         public void UpdateSimulation()
         {
             HandleStateTransitions();
@@ -84,30 +87,18 @@ namespace OpcServer
             }
 
             if (MachineStatus != "Running")
-            {                
+            {
                 return;
             }
 
             _cycleCount++;
-            _cyclesSinceLastError++;
+            _cyclesSinceLastIssue++;
 
-            // Randomly cause bigger deviations every 200-400 cycles
-            double variation = 1.0;
+            // Decide if we should trigger an issue
+            DetermineSimulationMode();
 
-            if (_cyclesSinceLastError > 200 && _random.NextDouble() < 0.005)
-            {
-                variation = _random.Next(5, 10);
-                _cyclesSinceLastError = 0;
-                Console.WriteLine($"[MACHINE] Process upset at cycle {_cycleCount}!");
-            }
-            
-            // Simulate realistic variations
-            ActualFillVolume = TargetFillVolume + (_random.NextDouble() - 0.5) * 4.0 * variation;
-            ActualLineSpeed = TargetLineSpeed + (_random.NextDouble() - 0.5) * 10.0 * variation;
-            ActualProductTemperature = TargetProductTemperature + (_random.NextDouble() - 0.5) * 1.0 * variation;
-            ActualCO2Pressure = TargetCO2Pressure + (_random.NextDouble() - 0.5) * 0.1 * variation;
-            ActualCapTorque = TargetCapTorque + (_random.NextDouble() - 0.5) * 2.0 * variation;
-            ActualCycleTime = TargetCycleTime + (_random.NextDouble() - 0.5) * 0.2 * variation;
+            // Update all process values
+            UpdateProcessValues();
 
             // Slowly decrease tank level
             ProductLevelTank = Math.Max(10.0, ProductLevelTank - 0.01);
@@ -116,8 +107,59 @@ namespace OpcServer
             var stationNumber = (Environment.TickCount / 3000) % 16 + 1;
             CurrentStation = $"Station {stationNumber}";
 
+            // Update production counters
             UpdateBottleProduction();
+
+            // Check for alarms
             CheckAlarms();
+        }
+
+        private void DetermineSimulationMode()
+        {
+            // Normal operation most of the time
+            if (_simulationMode == "normal")
+            {
+                // Every 10-15 minutes (600-900 seconds), start a drift
+                if (_cyclesSinceLastIssue > 600 && _random.NextDouble() < 0.002)
+                {
+                    _simulationMode = "drift";
+                    _driftCycles = 0;
+                    _driftFactor = 1.0;
+                    _cyclesSinceLastIssue = 0;
+                    Console.WriteLine($"[MACHINE] Starting gradual drift at cycle {_cycleCount}");
+                }
+            }
+            // During drift, gradually increase deviation
+            else if (_simulationMode == "drift")
+            {
+                _driftCycles++;
+                _driftFactor = 1.0 + (_driftCycles * 0.015); // Gradually increase to ~4% over 3 cycles
+
+                // After drift causes alarm, return to normal
+                if (_driftCycles > 5)
+                {
+                    _simulationMode = "normal";
+                    _driftFactor = 1.0;
+                    Console.WriteLine($"[MACHINE] Drift ended at cycle {_cycleCount}");
+                }
+            }
+        }
+
+        private void UpdateProcessValues()
+        {
+            // Base variation: very small (±0.5% to ±1%)
+            double baseVariation = 0.01;
+
+            // Apply drift factor if in drift mode
+            double variation = baseVariation * _driftFactor;
+
+            // Update each parameter with small random variation
+            ActualFillVolume = TargetFillVolume * (1.0 + (_random.NextDouble() - 0.5) * variation);
+            ActualLineSpeed = TargetLineSpeed * (1.0 + (_random.NextDouble() - 0.5) * variation);
+            ActualProductTemperature = TargetProductTemperature * (1.0 + (_random.NextDouble() - 0.5) * variation);
+            ActualCO2Pressure = TargetCO2Pressure * (1.0 + (_random.NextDouble() - 0.5) * variation);
+            ActualCapTorque = TargetCapTorque * (1.0 + (_random.NextDouble() - 0.5) * variation);
+            ActualCycleTime = TargetCycleTime * (1.0 + (_random.NextDouble() - 0.5) * variation);
         }
 
         private void HandleStateTransitions()
@@ -144,12 +186,12 @@ namespace OpcServer
         {
             _errorRecoveryCycles++;
 
-            // Correct values back to targets over 5 cycles           
-            ActualFillVolume = ActualFillVolume * 0.7 + TargetFillVolume * 0.3;
-            ActualLineSpeed = ActualLineSpeed * 0.7 + TargetLineSpeed * 0.3;
-            ActualProductTemperature = ActualProductTemperature * 0.7 + TargetProductTemperature * 0.3;
-            ActualCO2Pressure = ActualCO2Pressure * 0.7 + TargetCO2Pressure * 0.3;
-            ActualCapTorque = ActualCapTorque * 0.7 + TargetCapTorque * 0.3;
+            // Gradually correct values back to targets
+            ActualFillVolume = ActualFillVolume * 0.6 + TargetFillVolume * 0.4;
+            ActualLineSpeed = ActualLineSpeed * 0.6 + TargetLineSpeed * 0.4;
+            ActualProductTemperature = ActualProductTemperature * 0.6 + TargetProductTemperature * 0.4;
+            ActualCO2Pressure = ActualCO2Pressure * 0.6 + TargetCO2Pressure * 0.4;
+            ActualCapTorque = ActualCapTorque * 0.6 + TargetCapTorque * 0.4;
 
             // Refill tank if low
             if (ProductLevelTank < 50.0)
@@ -162,15 +204,25 @@ namespace OpcServer
             {
                 Console.WriteLine($"[MACHINE] Error recovered after {_errorRecoveryCycles} cycles");
                 ActiveAlarms.Clear();
+
+                // Reset to clean state
+                ActualFillVolume = TargetFillVolume;
+                ActualLineSpeed = TargetLineSpeed;
+                ActualProductTemperature = TargetProductTemperature;
+                ActualCO2Pressure = TargetCO2Pressure;
+                ActualCapTorque = TargetCapTorque;
+
                 MachineStatus = "Running";
                 _errorRecoveryCycles = 0;
+                _simulationMode = "normal";
+                _driftFactor = 1.0;
             }
         }
 
         private void UpdateBottleProduction()
         {
-            // Simulate bottle production every cycle - 98% pass rate
-            bool passed = _random.NextDouble() < 0.98;
+            // 99.8% pass rate = 0.2% failure rate (below 0.5% alarm threshold)
+            bool passed = _random.NextDouble() < 0.998;
 
             if (passed)
             {
@@ -202,54 +254,6 @@ namespace OpcServer
         {
             ActiveAlarms.Clear();
 
-            // Record current cycle data
-            RecordCycleData("FillVolume", ActualFillVolume, TargetFillVolume);
-            RecordCycleData("LineSpeed", ActualLineSpeed, TargetLineSpeed);
-            RecordCycleData("ProductTemperature", ActualProductTemperature, TargetProductTemperature);
-            RecordCycleData("CO2Pressure", ActualCO2Pressure, TargetCO2Pressure);
-            RecordCycleData("CapTorque", ActualCapTorque, TargetCapTorque);
-            RecordCycleData("CycleTime", ActualCycleTime, TargetCycleTime);
-
-            // Special beverage industry alarms
-            CheckSpecialAlarms();
-
-            // General parameter deviation alarms
-            CheckParameterDeviations();
-
-            // Quality control alarm
-            if (TotalBottles > 0)
-            {
-                double failureRate = (double)TotalBadBottles / TotalBottles * 100.0;
-                if (failureRate > 0.5)
-                {
-                    ActiveAlarms.Add($"ALARM: Quality failure rate {failureRate:F2}% exceeds 0.5%");
-                }
-            }
-
-            // Set machine to Error if critical alarms detected
-            if (ActiveAlarms.Count > 0 && MachineStatus == "Running")
-                MachineStatus = "Error";
-        }
-
-        private void RecordCycleData(string parameter, double actual, double target)
-        {
-            if (!_deviationHistory.ContainsKey(parameter))
-            {
-                _deviationHistory[parameter] = new Queue<double>();
-            }
-
-            double deviation = Math.Abs(actual - target) / target * 100.0;
-            var queue = _deviationHistory[parameter];
-
-            queue.Enqueue(deviation);
-            while (queue.Count > 3)
-            {
-                queue.Dequeue();
-            }
-        }
-
-        private void CheckSpecialAlarms()
-        {
             // Fill volume deviation alarm: ±1%
             if (Math.Abs(FillAccuracyDeviation / TargetFillVolume * 100) > 1.0)
             {
@@ -279,25 +283,21 @@ namespace OpcServer
             {
                 ActiveAlarms.Add($"ALARM: Cap torque {ActualCapTorque:F1} Nm outside ±10% range");
             }
-        }
 
-        private void CheckParameterDeviations()
-        {
-            foreach (var param in _deviationHistory.Keys)
+            // Quality control alarm: > 0.5% failure rate
+            if (TotalBottles > 1000)
             {
-                var deviations = _deviationHistory[param].ToList();
-
-                // Check for 3% deviation for 3 cycles in a row
-                if (deviations.Count >= 3 && deviations.All(d => d > 3.0))
+                double failureRate = (double)TotalBadBottles / TotalBottles * 100.0;
+                if (failureRate > 0.5)
                 {
-                    ActiveAlarms.Add($"ALARM: {param} deviation > 3% for 3 cycles");
+                    ActiveAlarms.Add($"ALARM: Quality failure rate {failureRate:F2}% exceeds 0.5%");
                 }
+            }
 
-                // Check for 8% deviation in single cycle
-                if (deviations.Count >= 1 && deviations.Last() > 8.0)
-                {
-                    ActiveAlarms.Add($"ALARM: {param} deviation > 8% in single cycle");
-                }
+            // Set machine to Error if alarms detected
+            if (ActiveAlarms.Count > 0 && MachineStatus == "Running")
+            {
+                MachineStatus = "Error";
             }
         }
 

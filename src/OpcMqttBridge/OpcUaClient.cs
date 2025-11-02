@@ -1,6 +1,7 @@
 using Opc.Ua;
 using Opc.Ua.Client;
 using Opc.Ua.Configuration;
+using System.Linq;
 
 namespace OpcMqttBridge
 {
@@ -9,7 +10,12 @@ namespace OpcMqttBridge
         private readonly string _endpointUrl;
         private readonly string _applicationName;
         private Session? _session;
+        private Subscription? _subscription;
         private readonly List<string> _nodeIds;
+        private bool _isReconnecting = false;
+
+        // Event fired when monitored items change
+        public event EventHandler<ValueChangedEventArgs>? ValueChanged;
 
         public OpcUaClient(string endpointUrl, string applicationName)
         {
@@ -148,13 +154,6 @@ namespace OpcMqttBridge
                     MinSubscriptionLifetime = 10000,
                 },
 
-                TraceConfiguration = new TraceConfiguration
-                {
-                    OutputFilePath = "%CommonApplicationData%\\OPC Foundation\\Logs\\OpcUaClient.log",
-                    DeleteOnLoad = true,
-                    TraceMasks = 0
-                },
-
                 DisableHiResClock = false
             };
 
@@ -167,6 +166,7 @@ namespace OpcMqttBridge
             var endpointConfiguration = EndpointConfiguration.Create(config);
             var configuredEndpoint = new ConfiguredEndpoint(null, endpoint, endpointConfiguration);
 
+            // Create session with keep-alive handler
             _session = await Session.Create(
                 config,
                 configuredEndpoint,
@@ -174,37 +174,185 @@ namespace OpcMqttBridge
                 _applicationName,
                 60000,
                 new UserIdentity(new AnonymousIdentityToken()),
-                null
-            );
+                null);
+
+            // Set up session keep-alive for reconnection
+            _session.KeepAlive += Session_KeepAlive;
+
+            Console.WriteLine("OPC UA session created successfully");
         }
 
         public async Task<Dictionary<string, object>> ReadAllVariablesAsync()
         {
-            var result = new Dictionary<string, object>();
+            if (_session == null || !_session.Connected)
+                throw new InvalidOperationException("Not connected to OPC UA server");
 
+            var readValueIds = new ReadValueIdCollection();
             foreach (var nodeId in _nodeIds)
             {
-                try
+                readValueIds.Add(new ReadValueId
                 {
-                    var value = _session!.ReadValue(nodeId);
-                    var variableName = nodeId.Split('=').Last();
-                    result[variableName] = value.Value ?? "null";
-                }
-                catch (Exception ex)
+                    NodeId = new NodeId(nodeId),
+                    AttributeId = Attributes.Value
+                });
+            }
+
+            var response = _session.Read(null, 0, TimestampsToReturn.Neither, readValueIds, out var results, out _);
+
+            var data = new Dictionary<string, object>();
+            for (int i = 0; i < _nodeIds.Count && i < results.Count; i++)
+            {
+                if (StatusCode.IsGood(results[i].StatusCode))
                 {
-                    Console.WriteLine($"Error reading {nodeId}: {ex.Message}");
+                    var nodeId = _nodeIds[i].Split(';').Last().Replace("s=", "");
+                    data[nodeId] = results[i].Value;
                 }
             }
 
-            return await Task.FromResult(result);
+            return data;
+        }
+
+        public async Task CreateSubscriptionAsync(int publishingInterval = 1000)
+        {
+            if (_session == null || !_session.Connected)
+                throw new InvalidOperationException("Not connected to OPC UA server");
+
+            // Create subscription
+            _subscription = new Subscription(_session.DefaultSubscription)
+            {
+                PublishingEnabled = true,
+                PublishingInterval = publishingInterval,
+                KeepAliveCount = 10,
+                LifetimeCount = 100,
+                MaxNotificationsPerPublish = 1000,
+                Priority = 100
+            };
+
+            // Add monitored items for all node IDs
+            foreach (var nodeId in _nodeIds)
+            {
+                var monitoredItem = new MonitoredItem(_subscription.DefaultItem)
+                {
+                    StartNodeId = new NodeId(nodeId),
+                    AttributeId = Attributes.Value,
+                    DisplayName = nodeId,
+                    SamplingInterval = publishingInterval,
+                    QueueSize = 1,
+                    DiscardOldest = true
+                };
+
+                // Set up notification handler
+                monitoredItem.Notification += OnMonitoredItemNotification;
+
+                _subscription.AddItem(monitoredItem);
+            }
+
+            // Create the subscription on the server
+            await Task.Run(() => _session.AddSubscription(_subscription));
+            _subscription.Create();
+
+            Console.WriteLine($"Subscription created with {_subscription.MonitoredItemCount} monitored items");
+            Console.WriteLine($"Publishing interval: {publishingInterval}ms");
+        }
+
+        private void OnMonitoredItemNotification(MonitoredItem item, MonitoredItemNotificationEventArgs e)
+        {
+            try
+            {
+                // Extract node name from the StartNodeId
+                var nodeId = item.StartNodeId.ToString();
+                var nodeName = nodeId.Split(';').Last().Replace("s=", "");
+
+                if (e.NotificationValue is MonitoredItemNotification notification)
+                {
+                    // Fire the ValueChanged event with node name and value
+                    ValueChanged?.Invoke(this, new ValueChangedEventArgs
+                    {
+                        NodeName = nodeName,
+                        Value = notification.Value.Value,
+                        Timestamp = notification.Value.SourceTimestamp
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error processing notification: {ex.Message}");
+            }
+        }
+
+        private async void Session_KeepAlive(ISession session, KeepAliveEventArgs e)
+        {
+            if (e.Status != null && ServiceResult.IsNotGood(e.Status))
+            {
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Keep-alive failed: {e.Status}");
+
+                if (!_isReconnecting && _session != null)
+                {
+                    _isReconnecting = true;
+                    Console.WriteLine("Attempting to reconnect...");
+
+                    try
+                    {
+                        await ReconnectAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Reconnection failed: {ex.Message}");
+                    }
+                    finally
+                    {
+                        _isReconnecting = false;
+                    }
+                }
+            }
+        }
+
+        private async Task ReconnectAsync()
+        {
+            try
+            {
+                if (_session != null)
+                {
+                    await _session.ReconnectAsync(CancellationToken.None);
+                    Console.WriteLine("Reconnected successfully");
+
+                    // Recreate subscription if it was lost
+                    if (_subscription != null && !_subscription.Created)
+                    {
+                        _subscription.Create();
+                        Console.WriteLine("Subscription recreated");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Reconnect error: {ex.Message}");
+                throw;
+            }
+        }
+
+        public bool IsConnected()
+        {
+            return _session != null && _session.Connected;
         }
 
         public async Task DisconnectAsync()
         {
             try
             {
+                // Remove subscription
+                if (_subscription != null && _session != null)
+                {
+                    _session.RemoveSubscription(_subscription);
+                    _subscription.Delete(true);
+                    _subscription.Dispose();
+                    _subscription = null;
+                }
+
+                // Close session
                 if (_session != null && _session.Connected)
                 {
+                    _session.KeepAlive -= Session_KeepAlive;
                     _session.Close();
                     _session.Dispose();
                     _session = null;
@@ -216,6 +364,12 @@ namespace OpcMqttBridge
             }
             await Task.CompletedTask;
         }
+    }
 
+    public class ValueChangedEventArgs : EventArgs
+    {
+        public string NodeName { get; set; } = string.Empty;
+        public object Value { get; set; } = null!;
+        public DateTime Timestamp { get; set; }
     }
 }
