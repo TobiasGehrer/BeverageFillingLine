@@ -18,7 +18,7 @@ pipeline:
         root.line = meta("mqtt_topic").split("/").index(-2)
         
     - branch:
-        request_map: 'root = if this.metric.re_match("(machine_status|production_order|alarms_active|counters_.*|process_.*)") { this.line }'
+        request_map: 'root = if this.metric.re_match("(machine_status|machine_current_station|machine_cleaning_status|production_.*|quality_.*|alarms_.*|counters_.*|process_.*)") { this.line }'
         processors:
           - redis:
               url: "redis://redis:6379"
