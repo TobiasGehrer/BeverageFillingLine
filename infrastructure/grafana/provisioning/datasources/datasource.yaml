@@ -2,11 +2,15 @@ apiVersion: 1
 
 datasources:
   - name: TimescaleDB
-    type: postgres
+    type: grafana-postgresql-datasource
+    uid: ef38fe8vzbrpcf
+    orgId: 1
     access: proxy
     url: timescaledb:5432
     database: beverage_data
     user: admin
+    isDefault: true
+    editable: false
     secureJsonData:
       password: admin123
     jsonData:
