@@ -17,3 +17,15 @@ datasources:
       sslmode: 'disable'
       postgresVersion: 1600
       timescaledb: true
+
+  - name: Redis
+    type: redis-datasource
+    uid: redis-datasource
+    orgId: 1
+    access: proxy
+    url: redis:6379
+    isDefault: false
+    editable: false
+    jsonData:
+      client: standalone
+      tlsSkipVerify: true

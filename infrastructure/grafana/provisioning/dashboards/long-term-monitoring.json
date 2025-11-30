@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 2,
+  "id": 1,
   "links": [],
   "panels": [
     {
@@ -644,7 +644,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ROUND((MAX(CASE WHEN metric = 'counters_good_bottles' THEN value END) - MIN(CASE WHEN metric = 'counters_good_bottles' THEN value END)) * 100.0 \r\n  / NULLIF(MAX(CASE WHEN metric = 'counters_total_bottles' THEN value END) - MIN(CASE WHEN metric = 'counters_total_bottles' THEN value END), 0), 2) as value\r\nFROM beverage_metrics\r\nWHERE time >= NOW() - INTERVAL '30 days' AND metric IN ('counters_good_bottles', 'counters_total_bottles')",
+          "rawSql": "SELECT ROUND(((MAX(CASE WHEN metric = 'counters_good_bottles' THEN value END) - MIN(CASE WHEN metric = 'counters_good_bottles' THEN value END)) * 100.0 \r\n  / NULLIF(MAX(CASE WHEN metric = 'counters_total_bottles' THEN value END) - MIN(CASE WHEN metric = 'counters_total_bottles' THEN value END), 0))::numeric, 2) as value\r\nFROM beverage_metrics\r\nWHERE time >= NOW() - INTERVAL '30 days' AND metric IN ('counters_good_bottles', 'counters_total_bottles')",
           "refId": "A",
           "sql": {
             "columns": [

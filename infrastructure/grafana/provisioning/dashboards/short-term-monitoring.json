@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 0,
+  "id": 2,
   "links": [],
   "panels": [
     {
@@ -149,8 +149,8 @@
     },
     {
       "datasource": {
-        "type": "grafana-postgresql-datasource",
-        "uid": "ef38fe8vzbrpcf"
+        "type": "redis-datasource",
+        "uid": "redis-datasource"
       },
       "fieldConfig": {
         "defaults": {
@@ -215,29 +215,17 @@
       "pluginVersion": "12.2.1",
       "targets": [
         {
-          "dataset": "beverage_data",
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT AVG(value) as value\r\nFROM beverage_metrics\r\nWHERE metric = 'process_tank_level_percent' AND time >= NOW() - INTERVAL '5 minutes'",
+          "command": "hget",
+          "datasource": {
+            "type": "redis-datasource",
+            "uid": "redis-datasource"
+          },
+          "field": "process_tank_level_percent",
+          "key": "filling-line-1",
+          "keyName": "filling-line-1",
+          "query": "",
           "refId": "A",
-          "sql": {
-            "columns": [
-              {
-                "parameters": [],
-                "type": "function"
-              }
-            ],
-            "groupBy": [
-              {
-                "property": {
-                  "type": "string"
-                },
-                "type": "groupBy"
-              }
-            ],
-            "limit": 50
-          }
+          "type": "command"
         }
       ],
       "title": "Tank Level",
@@ -374,8 +362,8 @@
     },
     {
       "datasource": {
-        "type": "grafana-postgresql-datasource",
-        "uid": "ef38fe8vzbrpcf"
+        "type": "redis-datasource",
+        "uid": "redis-datasource"
       },
       "fieldConfig": {
         "defaults": {
@@ -410,7 +398,7 @@
         "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
-            "allValues"
+            "lastNotNull"
           ],
           "fields": "/.*/",
           "values": false
@@ -422,29 +410,17 @@
       "pluginVersion": "12.2.1",
       "targets": [
         {
-          "dataset": "beverage_data",
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT text_value as value\r\nFROM beverage_metrics\r\nWHERE metric = 'machine_status'\r\nORDER BY time DESC\r\nLIMIT 1",
+          "command": "hget",
+          "datasource": {
+            "type": "redis-datasource",
+            "uid": "redis-datasource"
+          },
+          "field": "machine_status",
+          "key": "filling-line-1",
+          "keyName": "filling-line-1",
+          "query": "",
           "refId": "A",
-          "sql": {
-            "columns": [
-              {
-                "parameters": [],
-                "type": "function"
-              }
-            ],
-            "groupBy": [
-              {
-                "property": {
-                  "type": "string"
-                },
-                "type": "groupBy"
-              }
-            ],
-            "limit": 50
-          }
+          "type": "command"
         }
       ],
       "title": "Machine Status",
@@ -574,7 +550,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "continuous-blues"
           },
           "custom": {
             "axisBorderShow": false,
@@ -582,11 +558,10 @@
             "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
-            "axisSoftMin": 0,
             "barAlignment": 0,
             "barWidthFactor": 0.6,
             "drawStyle": "line",
-            "fillOpacity": 30,
+            "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -815,26 +790,25 @@
     },
     {
       "datasource": {
-        "type": "grafana-postgresql-datasource",
-        "uid": "ef38fe8vzbrpcf"
+        "type": "redis-datasource",
+        "uid": "redis-datasource"
       },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "thresholds"
           },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "footer": {
-              "reducers": []
-            },
-            "inspect": false,
-            "wrapHeaderText": false
-          },
-          "mappings": [],
+          "mappings": [
+            {
+              "options": {
+                "null": {
+                  "index": 0,
+                  "text": "No Alarms"
+                }
+              },
+              "type": "value"
+            }
+          ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -844,7 +818,7 @@
               },
               {
                 "color": "red",
-                "value": 80
+                "value": 1
               }
             ]
           }
@@ -860,52 +834,42 @@
       "id": 8,
       "options": {
         "cellHeight": "sm",
+        "colorMode": "value",
         "enablePagination": true,
-        "showHeader": true
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        },
+        "showHeader": true,
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
       "pluginVersion": "12.2.1",
       "targets": [
         {
-          "dataset": "beverage_data",
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT time, line, text_value as alarm\r\nFROM beverage_metrics\r\nWHERE metric = 'alarms_active' AND text_value IS NOT NULL AND time >= NOW() - INTERVAL '24 hours'\r\nORDER BY time DESC\r\nLIMIT 50",
+          "command": "hget",
+          "datasource": {
+            "type": "redis-datasource",
+            "uid": "redis-datasource"
+          },
+          "field": "alarms_active",
+          "key": "filling-line-1",
+          "keyName": "filling-line-1",
+          "query": "",
           "refId": "A",
-          "sql": {
-            "columns": [
-              {
-                "parameters": [],
-                "type": "function"
-              }
-            ],
-            "groupBy": [
-              {
-                "property": {
-                  "type": "string"
-                },
-                "type": "groupBy"
-              }
-            ],
-            "limit": 50
-          }
+          "type": "command"
         }
       ],
       "title": "Active Alarms - Last 24h",
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {},
-            "includeByName": {},
-            "indexByName": {},
-            "orderBy": [],
-            "orderByMode": "manual",
-            "renameByName": {}
-          }
-        }
-      ],
-      "type": "table"
+      "type": "stat"
     }
   ],
   "preload": false,
@@ -923,5 +887,5 @@
   "timezone": "browser",
   "title": "SHORT-TERM DASHBOARD (24 Hours)",
   "uid": "ad74kv2",
-  "version": 3
+  "version": 1
 }
