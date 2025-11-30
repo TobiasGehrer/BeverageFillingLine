@@ -594,5 +594,5 @@ docker exec -it timescaledb psql -U admin -d beverage_data \
 ---
 
 **Author:** Tobias Gehrer  
-**Course:** Advanced Data Management
-**GitHub Repository:** https://github.com/TobiasGehrer/BeverageFillingLine
+**Course:** Advanced Data Management (WS25/26)  
+**GitHub Repository:** https://github.com/TobiasGehrer/BeverageFillingLine  
