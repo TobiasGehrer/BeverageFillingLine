@@ -1,12 +1,7 @@
--- ============================================
--- TimescaleDB Setup - Assignment Requirements
--- ============================================
-
--- Enable TimescaleDB extension
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 -- ============================================
--- 3) Hypertable - Main Metrics Table
+-- Hypertable - Main Metrics Table
 -- ============================================
 CREATE TABLE IF NOT EXISTS beverage_metrics (
     time TIMESTAMPTZ NOT NULL,
@@ -24,7 +19,7 @@ CREATE TABLE IF NOT EXISTS beverage_metrics (
 SELECT create_hypertable('beverage_metrics', 'time', if_not_exists => TRUE);
 
 -- ============================================
--- 4) Retention Policy - Keep data for 90 days
+-- Retention Policy - Keep data for 90 days
 -- ============================================
 SELECT add_retention_policy('beverage_metrics', INTERVAL '90 days', if_not_exists => TRUE);
 
@@ -39,7 +34,7 @@ CREATE INDEX IF NOT EXISTS idx_production_order
     WHERE production_order IS NOT NULL;
 
 -- ============================================
--- 6) Continuous Aggregate - Hourly KPIs
+-- Continuous Aggregate - Hourly KPIs
 -- ============================================
 CREATE MATERIALIZED VIEW IF NOT EXISTS hourly_kpis
 WITH (timescaledb.continuous) AS
@@ -68,7 +63,7 @@ SELECT add_continuous_aggregate_policy('hourly_kpis',
     if_not_exists => TRUE);
 
 -- ============================================
--- 7) Continuous Aggregate - Daily KPIs
+-- Continuous Aggregate - Daily KPIs
 -- ============================================
 CREATE MATERIALIZED VIEW IF NOT EXISTS daily_kpis
 WITH (timescaledb.continuous) AS
