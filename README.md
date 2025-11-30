@@ -14,7 +14,6 @@ This project implements an industrial IoT data pipeline for a beverage filling l
 3. [Use Case: Data Enrichment & Hydration](#use-case-data-enrichment--hydration)
 4. [Testing Each Component](#testing-each-component)
 5. [Service Ports & Access](#service-ports--access)
-6. [Troubleshooting](#troubleshooting)
 
 ---
 
